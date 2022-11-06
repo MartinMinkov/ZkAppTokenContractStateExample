@@ -14,6 +14,7 @@
   "main": "build/src/index.js",
   "types": "build/src/index.d.ts",
   "scripts": {
+    "start": "npm install && npm run build && node build/src/index.js",
     "build": "tsc -p tsconfig.json",
     "coverage": "node --experimental-vm-modules --experimental-wasm-modules --experimental-wasm-threads node_modules/jest/bin/jest.js --coverage",
     "format": "prettier --write --ignore-unknown **/*",
@@ -41,9 +42,10 @@
     "lint-staged": "^11.0.1",
     "prettier": "^2.3.2",
     "ts-jest": "^27.0.7",
-    "typescript": "^4.7.2"
+    "typescript": "^4.7.2",
+    "tslog": "^3.3.4"
   },
   "peerDependencies": {
-    "snarkyjs": "^0.6.0"
+    "snarkyjs": "file://home/martin/Code/o1/mina/src/lib/snarky_js_bindings/snarkyjs"
   }
 }
