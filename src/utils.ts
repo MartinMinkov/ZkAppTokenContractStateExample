@@ -5,7 +5,7 @@ await isReady;
 export let { keys, addresses } = randomAccounts(
   'tokenContract',
   'zkappB',
-  'zkappC',
+  'consumeUSDCToUpdateState',
   'user1',
   'user2'
 );

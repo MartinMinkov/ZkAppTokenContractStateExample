@@ -10,7 +10,11 @@ import {
 
 await isReady;
 
-import { TokenContract, ZkAppB, ZkAppC } from './token_contract.js';
+import {
+  TokenContract,
+  ZkAppB,
+  ConsumeUSDCToUpdateState,
+} from './token_contract.js';
 
 import { keys, addresses, getBalance, getState } from './utils.js';
 
@@ -32,24 +36,31 @@ let feePayerAddress = feePayerKey.toPublicKey();
 debug('-------------------------------------------------');
 debug('FEE PAYER\t\t\t', feePayerAddress.toBase58());
 debug('TOKEN CONTRACT ADDRESS\t', addresses.tokenContract.toBase58());
+debug(
+  'consumeUSDCToUpdateState ADDRESS\t',
+  addresses.consumeUSDCToUpdateState.toBase58()
+);
 debug('zkAppB ADDRESS\t\t', addresses.zkappB.toBase58());
-debug('zkAppC ADDRESS\t\t', addresses.zkappC.toBase58());
 debug('USER1 ADDRESS\t\t', addresses.user1.toBase58());
 debug('-------------------------------------------------');
 
 debug('compile token contract');
 await TokenContract.compile();
 
-debug('compile zkAppB and zkAppC');
+debug('compile consumeUSDCToUpdateState and zkAppC');
 await ZkAppB.compile();
-await ZkAppC.compile();
+await ConsumeUSDCToUpdateState.compile();
 
 debug('initialize contracts');
 let tokenContract = new TokenContract(addresses.tokenContract);
-let tokenId = tokenContract.experimental.token.id;
+let tokenId = tokenContract.experimental.token.id; // This is the token ID for the USDC token -- it can be any token ID of a chosen smart contract
 
+// eslint-disable-next-line no-unused-vars, @typescript-eslint/no-unused-vars
 let zkAppB = new ZkAppB(addresses.zkappB, tokenId);
-let zkAppC = new ZkAppC(addresses.zkappC, tokenId);
+let consumeUSDCToUpdateState = new ConsumeUSDCToUpdateState(
+  addresses.consumeUSDCToUpdateState,
+  tokenId
+);
 
 debug('deploy and initialize token contract');
 tx = await Mina.transaction({ feePayerKey }, () => {
@@ -64,23 +75,55 @@ await tx.send();
 info(
   `TokenContract token balance: ${getBalance(addresses.tokenContract, tokenId)}`
 );
-info(`TokenContract state: ${getState(addresses.tokenContract)}`);
 
 debug('deploy zkApp contracts');
 tx = await Mina.transaction(feePayerKey, () => {
   AccountUpdate.createSigned(feePayerKey).balance.subInPlace(accountFee.mul(2));
   tokenContract.deployZkapp(addresses.zkappB, ZkAppB._verificationKey!);
-  tokenContract.deployZkapp(addresses.zkappC, ZkAppC._verificationKey!);
+  tokenContract.deployZkapp(
+    addresses.consumeUSDCToUpdateState,
+    ConsumeUSDCToUpdateState._verificationKey!
+  );
 });
 await tx.prove();
-tx.sign([keys.zkappB, keys.zkappC]);
+tx.sign([keys.zkappB, keys.consumeUSDCToUpdateState]);
 await tx.send();
 info(
   `zkAppB token balance: ${getBalance(addresses.zkappB, tokenId)}`,
-  `zkAppC token balance: ${getBalance(addresses.zkappC, tokenId)}`
+  `consumeUSDCToUpdateState token balance: ${getBalance(
+    addresses.consumeUSDCToUpdateState,
+    tokenId
+  )}`
 );
 
-debug('send tokens to zkAppB from token contract');
+info(
+  `consumeUSDCToUpdateState state: ${getState(
+    addresses.consumeUSDCToUpdateState,
+    tokenId
+  )}`
+);
+
+debug('consumeUSDCToUpdateState init');
+tx = await Local.transaction(feePayerKey, () => {
+  // consumeUSDCToUpdateState.init();
+  let update = Experimental.Callback.create(
+    consumeUSDCToUpdateState,
+    'init',
+    []
+  );
+  tokenContract.authorizeCallback(update);
+});
+await tx.prove();
+tx.sign([keys.consumeUSDCToUpdateState]);
+await tx.send();
+info(
+  `consumeUSDCToUpdateState state: ${getState(
+    addresses.consumeUSDCToUpdateState,
+    tokenId
+  )}`
+);
+
+debug('send tokens to consumeUSDCToUpdateState from token contract');
 tx = await Local.transaction(feePayerKey, () => {
   tokenContract.transfer(
     addresses.tokenContract,
@@ -88,68 +131,67 @@ tx = await Local.transaction(feePayerKey, () => {
     UInt64.from(100_000)
   );
 });
-
 await tx.prove();
 tx.sign([keys.tokenContract]);
 await tx.send();
 info(`zkAppB token balance: ${getBalance(addresses.zkappB, tokenId)}`);
 
-debug('alter state of token contract by paying fee in tokens from zkAppB');
+debug(
+  'alter state of consumeUSDCToUpdateState by paying in USDC tokens from zkAppB'
+);
 tx = await Local.transaction(feePayerKey, () => {
+  // let authorizeSendingCallback = Experimental.Callback.create(
+  //   zkAppB,
+  //   'approveSend',
+  //   [UInt64.from(1)]
+  // );
+
   let authorizeSendingCallback = Experimental.Callback.create(
-    zkAppB,
-    'approveSend',
-    [UInt64.from(1)]
+    consumeUSDCToUpdateState,
+    'updateStateIfUSDCIsSent',
+    [addresses.zkappB, Field(2)]
   );
-  tokenContract.updateStateIfTokenIsSent(authorizeSendingCallback, Field(2));
+  tokenContract.authorizeCallback(authorizeSendingCallback);
+  // consumeUSDCToUpdateState.updateStateIfUSDCIsSent(addresses.zkappB, Field(2));
 });
 await tx.prove();
-tx.sign([keys.zkappB]);
+tx.sign([keys.zkappB, keys.consumeUSDCToUpdateState]);
 await tx.send();
 
 info(`zkAppB token balance: ${getBalance(addresses.zkappB, tokenId)}`);
-info(`TokenContract state: ${getState(addresses.tokenContract)}`);
-
-debug(
-  'should fail if we alter state of token contract by not paying any tokens from zkAppB'
+info(
+  `consumeUSDCToUpdateState state: ${getState(
+    addresses.consumeUSDCToUpdateState,
+    tokenId
+  )}`
 );
-try {
-  tx = await Local.transaction(feePayerKey, () => {
-    let authorizeSendingCallback = Experimental.Callback.create(
-      zkAppB,
-      'approveSend',
-      [UInt64.from(0)]
-    );
-    tokenContract.updateStateIfTokenIsSent(authorizeSendingCallback, Field(3));
-  });
-  await tx.prove();
-  tx.sign([keys.zkappB]);
-  await tx.send();
-} catch (e) {
-  log.error(e);
-}
 
-info(`TokenContract state: ${getState(addresses.tokenContract)}`);
+// debug(
+//   'should fail if we alter state of consumeUSDCToUpdateState by not paying any USDC tokens '
+// );
+// try {
+//   tx = await Local.transaction(feePayerKey, () => {
+//     let authorizeSendingCallback = Experimental.Callback.create(
+//       zkAppB,
+//       'approveSend',
+//       [UInt64.from(0)]
+//     );
+//     consumeUSDCToUpdateState.updateStateIfUSDCIsSent(
+//       authorizeSendingCallback,
+//       Field(3)
+//     );
+//   });
+//   await tx.prove();
+//   tx.sign([keys.zkappB]);
+//   await tx.send();
+// } catch (e) {
+//   log.error(e);
+// }
 
-debug(
-  'should fail if we alter state of token contract with no token balance from zkAppC'
-);
-try {
-  tx = await Local.transaction(feePayerKey, () => {
-    let authorizeSendingCallback = Experimental.Callback.create(
-      zkAppC,
-      'approveSend',
-      [UInt64.from(1)]
-    );
-    tokenContract.updateStateIfTokenIsSent(authorizeSendingCallback, Field(4));
-  });
-  await tx.prove();
-  tx.sign([keys.zkappC]);
-  await tx.send();
-} catch (e) {
-  log.error(e);
-}
-
-info(`TokenContract state: ${getState(addresses.tokenContract)}`);
+// info(
+//   `consumeUSDCToUpdateState state: ${getState(
+//     addresses.consumeUSDCToUpdateState
+//   )}`
+// );
 
 shutdown();
