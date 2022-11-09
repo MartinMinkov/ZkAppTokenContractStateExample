@@ -84,6 +84,10 @@ export class TokenContract extends SmartContract {
       Int64.from(amount),
       'Balance change does not equal amount'
     );
+    senderBalanceChange.assertEquals(
+      receiverBalanceChange.neg(),
+      'Balance changes must be the same'
+    );
   }
 
   @method getBalance(publicKey: PublicKey): UInt64 {
