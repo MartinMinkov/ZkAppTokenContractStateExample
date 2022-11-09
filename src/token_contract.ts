@@ -37,7 +37,7 @@ export class TokenContract extends SmartContract {
   @method deployZkapp(address: PublicKey, verificationKey: VerificationKey) {
     let tokenId = this.experimental.token.id;
     let zkapp = AccountUpdate.defaultAccountUpdate(address, tokenId);
-    this.experimental.authorize(zkapp);
+    this.experimental.approve(zkapp);
     AccountUpdate.setValue(zkapp.update.permissions, {
       ...Permissions.default(),
       send: Permissions.proofOrSignature(),
@@ -50,41 +50,40 @@ export class TokenContract extends SmartContract {
     this.experimental.token.send({ from, to, amount: value });
   }
 
-  @method authorize(account: AccountUpdate) {
-    this.experimental.authorize(account);
-  }
-
-  @method authorizeStateCallback(cb: Experimental.Callback<any>) {
-    let update = this.experimental.authorize(
-      cb,
-      AccountUpdate.Layout.NoChildren
-    );
+  @method approveStateCallback(cb: Experimental.Callback<any>) {
+    let update = this.experimental.approve(cb, AccountUpdate.Layout.NoChildren);
     let balanceChange = Int64.fromObject(update.body.balanceChange);
     balanceChange.assertEquals(Int64.from(0), 'Balance change must be 0');
   }
 
-  @method authorizeCallback(
+  @method approveCallback(
     cb: Experimental.Callback<any>,
     amount: UInt64,
     account: PublicKey
   ) {
     let tokenId = this.experimental.token.id;
     let senderUpdate = AccountUpdate.defaultAccountUpdate(account, tokenId);
-    this.experimental.authorize(senderUpdate);
+    this.experimental.approve(senderUpdate);
 
     senderUpdate.balance.subInPlace(amount);
     let senderBalanceChange = Int64.fromObject(senderUpdate.body.balanceChange);
-    senderBalanceChange.assertEquals(Int64.from(amount).neg());
+    senderBalanceChange.assertEquals(
+      Int64.from(amount).neg(),
+      'Balance change does not equal amount'
+    );
     senderUpdate.sign();
 
-    let receiverUpdate = this.experimental.authorize(
+    let receiverUpdate = this.experimental.approve(
       cb,
       AccountUpdate.Layout.NoChildren
     );
     let receiverBalanceChange = Int64.fromObject(
       receiverUpdate.body.balanceChange
     );
-    receiverBalanceChange.assertEquals(Int64.from(amount));
+    receiverBalanceChange.assertEquals(
+      Int64.from(amount),
+      'Balance change does not equal amount'
+    );
   }
 
   @method getBalance(publicKey: PublicKey): UInt64 {
