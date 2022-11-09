@@ -111,7 +111,7 @@ tx = await Local.transaction(feePayerKey, () => {
     'init',
     []
   );
-  tokenContract.authorizeCallback(update);
+  tokenContract.authorizeStateCallback(update);
 });
 await tx.prove();
 tx.sign([keys.consumeUSDCToUpdateState]);
@@ -140,27 +140,32 @@ debug(
   'alter state of consumeUSDCToUpdateState by paying in USDC tokens from zkAppB'
 );
 tx = await Local.transaction(feePayerKey, () => {
-  // let authorizeSendingCallback = Experimental.Callback.create(
-  //   zkAppB,
-  //   'approveSend',
-  //   [UInt64.from(1)]
-  // );
+  let amount = UInt64.from(1);
 
-  let authorizeSendingCallback = Experimental.Callback.create(
+  let authorizeSendingCallback2 = Experimental.Callback.create(
     consumeUSDCToUpdateState,
     'updateStateIfUSDCIsSent',
-    [addresses.zkappB, Field(2)]
+    [amount, Field(2)]
   );
-  tokenContract.authorizeCallback(authorizeSendingCallback);
-  // consumeUSDCToUpdateState.updateStateIfUSDCIsSent(addresses.zkappB, Field(2));
+  tokenContract.authorizeCallback(
+    authorizeSendingCallback2,
+    amount,
+    addresses.zkappB
+  );
 });
 await tx.prove();
-tx.sign([keys.zkappB, keys.consumeUSDCToUpdateState]);
+tx.sign([keys.zkappB, keys.consumeUSDCToUpdateState, keys.tokenContract]);
 await tx.send();
 
 info(`zkAppB token balance: ${getBalance(addresses.zkappB, tokenId)}`);
 info(
   `consumeUSDCToUpdateState state: ${getState(
+    addresses.consumeUSDCToUpdateState,
+    tokenId
+  )}`
+);
+info(
+  `consume USDCTUpdateState token balance: ${getBalance(
     addresses.consumeUSDCToUpdateState,
     tokenId
   )}`

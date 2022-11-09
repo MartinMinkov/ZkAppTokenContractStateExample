@@ -14,7 +14,6 @@ import {
   State,
   state,
 } from 'snarkyjs';
-import { addresses } from './utils.js';
 
 export class TokenContract extends SmartContract {
   deploy(args?: DeployArgs) {
@@ -41,7 +40,7 @@ export class TokenContract extends SmartContract {
     this.experimental.authorize(zkapp);
     AccountUpdate.setValue(zkapp.update.permissions, {
       ...Permissions.default(),
-      send: Permissions.proof(),
+      send: Permissions.proofOrSignature(),
     });
     AccountUpdate.setValue(zkapp.update.verificationKey, verificationKey);
     zkapp.sign();
@@ -52,17 +51,40 @@ export class TokenContract extends SmartContract {
   }
 
   @method authorize(account: AccountUpdate) {
-    this.experimental.authorize(account, AccountUpdate.Layout.NoChildren);
+    this.experimental.authorize(account);
   }
 
-  @method authorizeCallback(cb: Experimental.Callback<any>) {
-    this.experimental.authorize(cb);
-    // let update = this.experimental.authorize(
-    //   cb,
-    //   AccountUpdate.Layout.AnyChildren
-    // );
-    // let balanceChange = Int64.fromObject(update.body.balanceChange);
-    // balanceChange.assertEquals(0, 'Balance change must be zero');
+  @method authorizeStateCallback(cb: Experimental.Callback<any>) {
+    let update = this.experimental.authorize(
+      cb,
+      AccountUpdate.Layout.NoChildren
+    );
+    let balanceChange = Int64.fromObject(update.body.balanceChange);
+    balanceChange.assertEquals(Int64.from(0), 'Balance change must be 0');
+  }
+
+  @method authorizeCallback(
+    cb: Experimental.Callback<any>,
+    amount: UInt64,
+    account: PublicKey
+  ) {
+    let tokenId = this.experimental.token.id;
+    let senderUpdate = AccountUpdate.defaultAccountUpdate(account, tokenId);
+    this.experimental.authorize(senderUpdate);
+
+    senderUpdate.balance.subInPlace(amount);
+    let senderBalanceChange = Int64.fromObject(senderUpdate.body.balanceChange);
+    senderBalanceChange.assertEquals(Int64.from(amount).neg());
+    senderUpdate.sign();
+
+    let receiverUpdate = this.experimental.authorize(
+      cb,
+      AccountUpdate.Layout.NoChildren
+    );
+    let receiverBalanceChange = Int64.fromObject(
+      receiverUpdate.body.balanceChange
+    );
+    receiverBalanceChange.assertEquals(Int64.from(amount));
   }
 
   @method getBalance(publicKey: PublicKey): UInt64 {
@@ -90,28 +112,19 @@ export class ConsumeUSDCToUpdateState extends SmartContract {
   @method init() {
     this.s.set(Field(1));
   }
-  // This method is used as a callback in the token contract to get the balance change of the zkapp
   @method approveSend(amount: UInt64) {
     this.balance.subInPlace(amount);
   }
 
-  @method updateStateIfUSDCIsSent(account: PublicKey, newState: Field) {
-    let tokenContract = new TokenContract(addresses.tokenContract);
-    let update = AccountUpdate.defaultAccountUpdate(
-      account,
-      tokenContract.experimental.token.id
-    );
-
-    update.balance.subInPlace(1);
-    // AccountUpdate.attachToTransaction(update);
-    //this.experimental.authorize(update);
-    tokenContract.authorize(update);
+  @method updateStateIfUSDCIsSent(amount: UInt64, newState: Field) {
+    // Increase the balance of the zkapp by the minimal amount
+    this.balance.addInPlace(amount);
 
     // Create constraints on balance change
-    let balanceChange = Int64.fromObject(update.body.balanceChange);
+    let balanceChange = Int64.fromObject(this.self.body.balanceChange);
     balanceChange.sgn
       .isPositive()
-      .assertFalse('Balance change magnitude must be negative');
+      .assertTrue('Balance change magnitude must be positive');
     balanceChange.magnitude.assertGt(
       UInt64.from(0),
       'Balance change must be positive'
